@@ -1,0 +1,53 @@
+[
+  {
+    "name": "later timestamp wins regardless of arrival order",
+    "ops": [
+      {"id": "s1", "f": {"type": ["rect", [100, 0, "a"]], "x": [10, [100, 0, "a"]]}},
+      {"id": "s1", "f": {"x": [99, [300, 0, "b"]]}},
+      {"id": "s1", "f": {"x": [50, [200, 0, "a"]]}}
+    ],
+    "expected": {"s1": {"type": ["rect", [100, 0, "a"]], "x": [99, [300, 0, "b"]]}}
+  },
+  {
+    "name": "counter breaks ties on equal wall time",
+    "ops": [
+      {"id": "s1", "f": {"color": ["#ff0000", [500, 2, "a"]]}},
+      {"id": "s1", "f": {"color": ["#00ff00", [500, 1, "b"]]}}
+    ],
+    "expected": {"s1": {"color": ["#ff0000", [500, 2, "a"]]}}
+  },
+  {
+    "name": "client id breaks ties on identical clock readings",
+    "ops": [
+      {"id": "s1", "f": {"text": ["from b", [500, 0, "b"]]}},
+      {"id": "s1", "f": {"text": ["from a", [500, 0, "a"]]}}
+    ],
+    "expected": {"s1": {"text": ["from b", [500, 0, "b"]]}}
+  },
+  {
+    "name": "concurrent move and delete: both apply, shape stays deleted",
+    "ops": [
+      {"id": "s1", "f": {"type": ["note", [100, 0, "a"]], "x": [0, [100, 0, "a"]], "deleted": [false, [100, 0, "a"]]}},
+      {"id": "s1", "f": {"x": [40, [210, 0, "a"]]}},
+      {"id": "s1", "f": {"deleted": [true, [205, 0, "b"]]}}
+    ],
+    "expected": {"s1": {"type": ["note", [100, 0, "a"]], "x": [40, [210, 0, "a"]], "deleted": [true, [205, 0, "b"]]}}
+  },
+  {
+    "name": "undo of a delete is just a newer write",
+    "ops": [
+      {"id": "s1", "f": {"type": ["ellipse", [1, 0, "a"]], "deleted": [true, [2, 0, "a"]]}},
+      {"id": "s1", "f": {"deleted": [false, [3, 0, "a"]]}}
+    ],
+    "expected": {"s1": {"type": ["ellipse", [1, 0, "a"]], "deleted": [false, [3, 0, "a"]]}}
+  },
+  {
+    "name": "duplicates are harmless",
+    "ops": [
+      {"id": "s2", "f": {"points": [[0, 0, 5, 5], [7, 0, "c"]]}},
+      {"id": "s2", "f": {"points": [[0, 0, 5, 5], [7, 0, "c"]]}},
+      {"id": "s2", "f": {"points": [[0, 0, 5, 5], [7, 0, "c"]]}}
+    ],
+    "expected": {"s2": {"points": [[0, 0, 5, 5], [7, 0, "c"]]}}
+  }
+]

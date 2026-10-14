@@ -1,0 +1,22 @@
+[project]
+name = "canvas-whiteboard"
+version = "1.0.0"
+description = "A real-time collaborative whiteboard built on a hand-written CRDT, with live cursors and offline merge."
+requires-python = ">=3.11"
+# Kept in sync with requirements.txt (Docker and CI install from that file).
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "redis>=5.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+timeout = 60
+filterwarnings = ["ignore::DeprecationWarning:starlette.*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"

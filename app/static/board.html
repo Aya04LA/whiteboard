@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Canvas</title>
+<meta name="description" content="A real-time collaborative whiteboard. Share the link and draw together, even offline.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230071e3'/><path d='M8 21c3-6 6 2 9-4s4-5 7-3' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round'/></svg>">
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  body { background: var(--surface); }
+  #board { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; display: block; }
+  #board.select { cursor: default; } #board.hand, #board.panning { cursor: grab; } #board.panning:active { cursor: grabbing; }
+  #board.erase { cursor: cell; }
+
+  /* Floating material chrome: the canvas runs underneath everything */
+  .chrome {
+    position: fixed; z-index: 10; display: flex; align-items: center; gap: 0.375rem; padding: 0.375rem;
+    border-radius: 999px; background: var(--material);
+    -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+    box-shadow: inset 0 1px 0 var(--material-edge), var(--shadow-lift);
+  }
+  .top-left { top: max(0.75rem, env(safe-area-inset-top)); left: 0.75rem; padding-left: 1rem; }
+  .top-right { top: max(0.75rem, env(safe-area-inset-top)); right: 0.75rem; }
+  .bottom { bottom: max(0.875rem, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); max-width: calc(100vw - 1.5rem); overflow-x: auto; scrollbar-width: none; }
+  .zoom { bottom: max(0.875rem, env(safe-area-inset-bottom)); right: 0.75rem; }
+  @media (max-width: 52rem) { .zoom { bottom: calc(max(0.875rem, env(safe-area-inset-bottom)) + 3.75rem); } }
+  .brand { font-weight: 700; letter-spacing: -0.02em; color: var(--text); margin-right: 0.25rem; }
+  .room { font-size: 0.8125rem; color: var(--muted); font-variant-numeric: tabular-nums; max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chrome button { min-height: 2.25rem; }
+  .icon-btn { width: 2.25rem; height: 2.25rem; min-height: 0; padding: 0; background: transparent; color: var(--text); }
+  @media (hover: hover) { .icon-btn:hover { background: var(--fill); } }
+  .icon-btn svg { width: 1.25rem; height: 1.25rem; }
+  .icon-btn:disabled { opacity: 0.3; }
+  .sep { width: 1px; align-self: stretch; background: var(--hair); margin: 0.25rem 0.125rem; flex: none; }
+
+  /* Tools: a segmented control with a spring thumb */
+  .tools.seg { background: transparent; padding: 0; }
+  .tools.seg button { width: 2.5rem; height: 2.5rem; min-height: 0; padding: 0; color: var(--text-2); }
+  .tools.seg button[aria-checked="true"] { color: var(--btn-text); }
+  .tools.seg .thumb { background: var(--btn); box-shadow: none; top: 0; bottom: 0; }
+  .tools svg { width: 1.25rem; height: 1.25rem; }
+
+  .swatches { display: flex; gap: 0.25rem; padding: 0 0.25rem; }
+  .swatch { width: 1.75rem; height: 1.75rem; min-height: 0; padding: 0; border-radius: 50%; background: transparent; position: relative; }
+  .swatch::before { content: ""; position: absolute; inset: 0.3125rem; border-radius: 50%; background: var(--c); transition: inset 160ms ease-out; }
+  .swatch[aria-checked="true"]::before { inset: 0.1875rem; }
+  .swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--c) inset; }
+  @media (hover: hover) { .swatch:hover { background: var(--fill); } }
+
+  .status { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0 0.625rem; font-size: 0.8125rem; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .status::before { content: ""; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--muted); }
+  .status.live::before { background: var(--ok); } .status.offline::before { background: var(--warn); } .status.offline { color: var(--warn); }
+  .avatars { display: flex; padding-left: 0.25rem; }
+  .avatar { width: 1.875rem; height: 1.875rem; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 0.75rem; font-weight: 700; background: var(--c); box-shadow: 0 0 0 2px var(--surface); margin-left: -0.375rem; }
+  .avatar:first-child { margin-left: 0; }
+  .avatar.more { background: var(--fill-strong); color: var(--text); }
+  .zoom .pct { min-width: 3.5rem; font-variant-numeric: tabular-nums; font-size: 0.8125rem; background: transparent; padding: 0 0.5rem; }
+
+  /* Other people's cursors */
+  #cursors { position: fixed; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
+  .peer { position: absolute; left: 0; top: 0; will-change: transform; transition: opacity 400ms ease; }
+  .peer svg { width: 18px; height: 18px; display: block; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.25)); }
+  .peer span { position: absolute; left: 14px; top: 16px; background: var(--c); color: #fff; font-size: 0.75rem; font-weight: 600; padding: 0.125rem 0.5rem; border-radius: 999px; white-space: nowrap; }
+  .peer.idle { opacity: 0.35; }
+
+  .hint { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 1; text-align: center; padding: 1rem; transition: opacity 300ms ease; }
+  .hint h1 { font-size: clamp(1.75rem, 5vw, 2.75rem); color: var(--text); opacity: 0.9; margin-bottom: 0.5rem; }
+  .hint p { color: var(--muted); max-width: 26rem; margin: 0 auto; }
+  .hint.hidden { opacity: 0; }
+
+  #editor {
+    position: fixed; z-index: 8; display: none; border: 0; outline: 2px solid var(--accent); border-radius: 6px; resize: none;
+    background: transparent; color: var(--text); font: 16px/1.35 system-ui, -apple-system, sans-serif; padding: 12px; transform-origin: 0 0;
+  }
+  @media (prefers-reduced-transparency: reduce) { .chrome { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+</style>
+</head>
+<body>
+  <canvas id="board" role="img" aria-label="Whiteboard"></canvas>
+  <div id="cursors" aria-hidden="true"></div>
+  <textarea id="editor" aria-label="Note text" spellcheck="true"></textarea>
+
+  <div class="hint" id="hint">
+    <div>
+      <h1>Draw anything.</h1>
+      <p>Share the link and draw together. Try going offline in one tab, drawing in both, then coming back.</p>
+    </div>
+  </div>
+
+  <header class="chrome top-left">
+    <a class="brand" href="/">Canvas</a>
+    <span class="room" id="room"></span>
+    <button type="button" class="primary" id="share">Share</button>
+  </header>
+
+  <div class="chrome top-right">
+    <div class="avatars" id="avatars" aria-label="People here"></div>
+    <span class="status" id="status" role="status" aria-live="polite">Connecting…</span>
+    <button type="button" id="offline" aria-pressed="false">Go offline</button>
+  </div>
+
+  <nav class="chrome bottom" aria-label="Tools">
+    <div class="seg tools" id="tools" role="radiogroup" aria-label="Tool">
+      <span class="thumb" aria-hidden="true"></span>
+      <button type="button" role="radio" data-value="select" aria-label="Select and move (V)" aria-keyshortcuts="V" title="Select (V)" tabindex="-1" aria-checked="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 3l14 8-6 1.5L10 19z"/></svg></button>
+      <button type="button" role="radio" data-value="hand" aria-label="Pan (H, or hold Space)" aria-keyshortcuts="H" title="Pan (H)" tabindex="-1" aria-checked="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12m0-1V4.5a1.5 1.5 0 0 1 3 0V12m0-6.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6h-.5a6 6 0 0 1-4.6-2.2L4 14.5a1.6 1.6 0 0 1 2.5-2L8 14"/></svg></button>
+      <button type="button" role="radio" data-value="pen" aria-label="Pen (P)" aria-keyshortcuts="P" title="Pen (P)" aria-checked="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/></svg></button>
+      <button type="button" role="radio" data-value="rect" aria-label="Rectangle (R)" aria-keyshortcuts="R" title="Rectangle (R)" tabindex="-1" aria-checked="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="6" width="16" height="12" rx="2"/></svg></button>
+      <button type="button" role="radio" data-value="ellipse" aria-label="Ellipse (O)" aria-keyshortcuts="O" title="Ellipse (O)" tabindex="-1" aria-checked="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="12" rx="8.5" ry="6.5"/></svg></button>
+      <button type="button" role="radio" data-value="note" aria-label="Sticky note (N)" aria-keyshortcuts="N" title="Note (N)" tabindex="-1" aria-checked="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 4h14v10l-6 6H5z"/><path d="M13 20v-6h6"/></svg></button>
+      <button type="button" role="radio" data-value="eraser" aria-label="Eraser (E)" aria-keyshortcuts="E" title="Eraser (E)" tabindex="-1" aria-checked="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="M8.5 19.5L3.7 14.7a1.5 1.5 0 0 1 0-2.1l8.9-8.9a1.5 1.5 0 0 1 2.1 0l5.6 5.6a1.5 1.5 0 0 1 0 2.1L12 19.5zM20 19.5H8.5M9 9l6.5 6.5"/></svg></button>
+    </div>
+    <span class="sep" aria-hidden="true"></span>
+    <div class="swatches" id="swatches" role="radiogroup" aria-label="Color"></div>
+    <span class="sep" aria-hidden="true"></span>
+    <button type="button" class="icon-btn" id="undo" aria-label="Undo" aria-keyshortcuts="Control+Z Meta+Z" title="Undo" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+    <button type="button" class="icon-btn" id="redo" aria-label="Redo" aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z" title="Redo" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+  </nav>
+
+  <div class="chrome zoom" aria-label="Zoom">
+    <button type="button" class="icon-btn" id="zoom-out" aria-label="Zoom out" title="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 12h12"/></svg></button>
+    <button type="button" class="pct" id="zoom-reset" aria-label="Reset zoom to 100%">100%</button>
+    <button type="button" class="icon-btn" id="zoom-in" aria-label="Zoom in" title="Zoom in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 12h12M12 6v12"/></svg></button>
+  </div>
+
+  <script src="/static/ui.js"></script>
+  <script type="module" src="/static/board.js"></script>
+</body>
+</html>
