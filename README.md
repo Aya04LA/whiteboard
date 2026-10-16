@@ -107,7 +107,7 @@ uvicorn app.main:app --reload
 
 **Two instances + Redis:** `docker compose up --build` → http://localhost:8080
 
-**Tests:** `pytest` (Python) and `node --test tests/js/` (browser CRDT, Node 22+).
+**Tests:** `pytest` (Python) and `node --test "tests/js/*.test.js"` (browser CRDT, Node 22+).
 
 **Deploying for free:** one container handles many rooms with the in-memory store. Add a free Redis (e.g. Upstash) via `REDIS_URL` for persistence across restarts and multiple instances. The host must support WebSockets.
 

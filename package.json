@@ -3,5 +3,5 @@
   "private": true,
   "type": "module",
   "description": "Only used to test static/crdt.js with node's built-in test runner. No dependencies.",
-  "scripts": { "test": "node --test tests/js/" }
+  "scripts": { "test": "node --test \"tests/js/*.test.js\"" }
 }
